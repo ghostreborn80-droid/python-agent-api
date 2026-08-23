@@ -579,8 +579,9 @@ CHECKOUT_HTML = """
 
   <div class="card">
     <p><b>Free Trial:</b> Get 50 requests for 7 days.</p>
-    <button type="button" onclick="getFreeTrial()">Get Free Trial API Key</button>
-    <div id="trial_result"></div>
+    <form action="/v1/billing/free-trial" method="post" target="_blank">
+      <button type="submit">Get Free Trial API Key</button>
+    </form>
   </div>
 
   <div class="card">
@@ -603,9 +604,11 @@ CHECKOUT_HTML = """
   <div class="card">
     <p><b>Step 1:</b> Send exactly <b>469 POL</b> to the wallet above on Polygon.</p>
     <p><b>Step 2:</b> Paste your transaction hash below.</p>
-    <input type="text" id="tx_hash" placeholder="0x..." />
-    <button type="button" onclick="verifyPayment()">Verify Payment & Get API Key</button>
-    <div id="result"></div>
+    <form action="/v1/billing/crypto/verify" method="get" target="_blank">
+      <input type="text" name="tx_hash" placeholder="0x..." required>
+      <input type="hidden" name="request_id" value="__REQUEST_ID__">
+      <button type="submit">Verify Payment & Get API Key</button>
+    </form>
   </div>
 
   <script>
@@ -689,6 +692,7 @@ def checkout_page():
         payment_json = json.dumps(payment)
 
     html = CHECKOUT_HTML.replace("__PAYMENT_JSON__", payment_json)
+    html = html.replace("__REQUEST_ID__", payment["request_id"])
     html = html.replace('<span id="chain">LOADING</span>', f'<span id="chain">{payment["chain"]} ({payment["symbol"]})</span>')
     html = html.replace('<code id="amount">LOADING</code>', f'<code id="amount">{payment["amount"]} {payment["symbol"]}</code>')
     html = html.replace('<code id="wallet">LOADING</code>', f'<code id="wallet">{payment["wallet_address"]}</code>')
