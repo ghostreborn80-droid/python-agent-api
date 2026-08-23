@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, "/app")
 sys.path.insert(0, "/content")
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from web3 import Web3
@@ -269,7 +269,42 @@ def _verify_evm_tx(chain: str, tx_hash: str, expected_wei: int) -> None:
 
 
 @app.post("/v1/billing/free-trial")
-def create_free_trial():
+def create_free_trial(request: Request):
+    # Get client IP, considering proxies/Render.
+    ip = request.headers.get("x-forwarded-for", "")
+    if ip:
+        ip = ip.split(",")[0].strip()
+    else:
+        ip = request.client.host if request.client else "unknown"
+
+    # If Supabase is configured, enforce one trial per IP per 7 days.
+    if SUPABASE_URL:
+        # Return active trial for the same IP if one already exists.
+        active_rows = _sb_get("trial_keys", {
+            "ip_address": f"eq.{ip}",
+            "expires_at": f"gt.{int(time.time())}",
+        })
+        if active_rows:
+            row = active_rows[0]
+            return {
+                "status": "trial_already_exists",
+                "api_key": row["api_key"],
+                "expires_in_days": 7,
+                "quota_limit": int(row.get("quota_limit", 50)),
+                "message": "Returning your existing active trial key.",
+            }
+
+        # Block if trial was created within the last 7 days but now expired.
+        recent_rows = _sb_get("trial_keys", {"ip_address": f"eq.{ip}"})
+        if recent_rows:
+            created_at = recent_rows[0].get("created_at", "")
+            # If any recent trial exists, block new trial creation.
+            return {
+                "status": "trial_already_used",
+                "message": "A free trial has already been claimed from this device/IP.",
+            }
+
+    # Create new trial key.
     key = "sk_trial_" + secrets.token_urlsafe(24)
     days = int(os.environ.get("TRIAL_DAYS", "7"))
     quota_limit = int(os.environ.get("TRIAL_QUOTA", "50"))
@@ -282,6 +317,7 @@ def create_free_trial():
             "expires_at": expires_at,
             "quota_limit": quota_limit,
             "quota_used": 0,
+            "ip_address": ip,
         })
     else:
         _trial_keys[key] = {
@@ -296,8 +332,6 @@ def create_free_trial():
         "expires_in_days": days,
         "quota_limit": quota_limit,
     }
-
-
 @app.get("/v1/billing/crypto/direct-address")
 def direct_evm_address(chain: str = "polygon"):
     if chain not in CHAINS:
