@@ -414,8 +414,40 @@ def checkout_page():
         payment = direct_evm_address(chain="polygon-amoy")
         payment_json = json.dumps(payment)
     except Exception as e:
-        payment_json = json.dumps({"error": str(e)})
-    return CHECKOUT_HTML.replace("__PAYMENT_JSON__", payment_json)
+        payment = {
+            "request_id": "ERROR",
+            "payment_id": 0,
+            "wallet_address": "ERROR",
+            "chain": "ERROR",
+            "symbol": "ERROR",
+            "amount": "ERROR",
+            "amount_wei": 0,
+        }
+        payment_json = json.dumps(payment)
+
+    html = CHECKOUT_HTML
+    html = html.replace("__PAYMENT_JSON__", payment_json)
+
+    # Server-render the visible values directly, so the page works even
+    # without JavaScript execution.
+    html = html.replace(
+        '<span id="chain">...</span>',
+        f'<span id="chain">{payment["chain"]} ({payment["symbol"]})</span>',
+    )
+    html = html.replace(
+        '<code id="amount">...</code>',
+        f'<code id="amount">{payment["amount"]} {payment["symbol"]}</code>',
+    )
+    html = html.replace(
+        '<code id="wallet">...</code>',
+        f'<code id="wallet">{payment["wallet_address"]}</code>',
+    )
+    html = html.replace(
+        '<span id="request_id"></span>',
+        f'<span id="request_id">{payment["request_id"]}</span>',
+    )
+
+    return html
 
 @app.get("/health")
 def health():
