@@ -552,6 +552,9 @@ CHECKOUT_HTML = """
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Python Agent API Access</title>
   <style>
     body { font-family: system-ui, sans-serif; background:#0b0f19; color:#e6e8ee; max-width:560px; margin:3rem auto; padding:0 1rem; }
@@ -567,6 +570,12 @@ CHECKOUT_HTML = """
   <div id="error_banner"></div>
   <h1>🐍 Python Agent API Access</h1>
   <p>Pay <b>469 POL</b> to receive a paid API key valid for 30 days.</p>
+
+  <div class="card" style="border-color:#f0b429">
+    <p><b>JavaScript Test:</b> Click this button. You should see "JS WORKS" appear below.</p>
+    <button type="button" onclick="document.getElementById('js_test_result').innerText='JS WORKS'">Test JavaScript</button>
+    <div id="js_test_result" style="color:#ffd166"></div>
+  </div>
 
   <div class="card">
     <p><b>Free Trial:</b> Get 50 requests for 7 days.</p>
@@ -684,7 +693,7 @@ def checkout_page():
     html = html.replace('<code id="amount">LOADING</code>', f'<code id="amount">{payment["amount"]} {payment["symbol"]}</code>')
     html = html.replace('<code id="wallet">LOADING</code>', f'<code id="wallet">{payment["wallet_address"]}</code>')
     html = html.replace('<span id="request_id">LOADING</span>', f'<span id="request_id">{payment["request_id"]}</span>')
-    return html
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
 
 
 @app.get("/health")
