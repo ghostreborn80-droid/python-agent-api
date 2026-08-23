@@ -456,10 +456,26 @@ CHECKOUT_HTML = """
   </div>
 
   <div class="card">
-    <p><b>How to use your API key:</b></p>
+    <p><b>How to use your API key</b></p>
     <p>Send requests with your key in the <code>X-API-Key</code> header.</p>
-    <p>Example endpoint:</p>
-    <code>POST https://python-agent-api.onrender.com/v1/ask-python</code>
+
+    <p><b>1. Ask a Python question</b></p>
+    <code>curl -X POST https://python-agent-api.onrender.com/v1/ask-python \<br>
+    -H "X-API-Key: YOUR_KEY" \<br>
+    -H "Content-Type: application/json" \<br>
+    -d '{"question":"How do I sort a list of dictionaries in Python?"}'</code>
+
+    <p><b>2. Generate and run a Python script</b></p>
+    <code>curl -X POST https://python-agent-api.onrender.com/v1/generate-script \<br>
+    -H "X-API-Key: YOUR_KEY" \<br>
+    -H "Content-Type: application/json" \<br>
+    -d '{"task":"Write a Python script to check if a number is prime"}'</code>
+
+    <p><b>3. Query the included sample project</b></p>
+    <code>curl -X POST https://python-agent-api.onrender.com/v1/codebase-query \<br>
+    -H "X-API-Key: YOUR_KEY" \<br>
+    -H "Content-Type: application/json" \<br>
+    -d '{"question":"What does generate_report call?"}'</code>
   </div>
 
   <div class="card">
