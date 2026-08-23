@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import requests
 import json
 import secrets
 from pathlib import Path
@@ -60,6 +61,42 @@ _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
 _direct_evm_keys: Dict[str, str] = {}
 _direct_evm_key_expiry: Dict[str, float] = {}
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+def _sb_headers():
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+def _sb_post(table, payload):
+    if not SUPABASE_URL:
+        raise HTTPException(status_code=500, detail="Supabase not configured")
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.post(url, headers=_sb_headers(), json=payload, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase insert error: {r.text[:200]}")
+
+def _sb_get(table, filters=None):
+    if not SUPABASE_URL:
+        return []
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.get(url, headers=_sb_headers(), params=filters or {}, timeout=30)
+    if r.status_code >= 400:
+        return []
+    return r.json()
+
+def _sb_patch(table, payload, filters):
+    if not SUPABASE_URL:
+        return
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.patch(url, headers=_sb_headers(), json=payload, params=filters, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase update error: {r.text[:200]}")
+
 
 def check_quota(api_key: str) -> None:
     now = int(time.time())
@@ -76,17 +113,28 @@ def check_quota(api_key: str) -> None:
 def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
     if not x_api_key:
         raise HTTPException(status_code=401, detail="Missing X-API-Key header.")
+
     if x_api_key == "demo-key":
         check_quota(x_api_key)
         return x_api_key
 
-    # Accept paid keys from the PAID_API_KEYS environment variable.
     paid_env = os.environ.get("PAID_API_KEYS", "")
     paid_keys = [k.strip() for k in paid_env.split(",") if k.strip()]
     if x_api_key in paid_keys:
         return x_api_key
 
-    # Direct EVM paid key with expiry check.
+    if SUPABASE_URL:
+        rows = _sb_get("paid_keys", {
+            "api_key": f"eq.{x_api_key}",
+            "expires_at": f"gt.{int(time.time())}",
+        })
+        if rows:
+            return x_api_key
+
+        any_rows = _sb_get("paid_keys", {"api_key": f"eq.{x_api_key}"})
+        if any_rows:
+            raise HTTPException(status_code=401, detail="API key expired. Pay for another month.")
+
     if "_direct_evm_keys" in globals() and x_api_key in _direct_evm_keys:
         expiry = _direct_evm_key_expiry.get(x_api_key)
         if expiry and time.time() > expiry:
@@ -94,26 +142,6 @@ def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
         return x_api_key
 
     raise HTTPException(status_code=401, detail="Invalid API key.")
-class AskPythonRequest(BaseModel):
-    question: str = Field(..., min_length=3, max_length=500)
-
-
-class GenerateScriptRequest(BaseModel):
-    task: str = Field(..., min_length=3, max_length=500)
-
-
-class CodebaseQueryRequest(BaseModel):
-    question: str = Field(..., min_length=3, max_length=500)
-
-
-class AgentResponse(BaseModel):
-    request_type: str
-    message: str
-    trace: List[str] = []
-    output: Optional[str] = None
-    tool: Optional[str] = None
-    status: str = "ok"
-
 
 def _extract_stdout(result: Any) -> Optional[str]:
     """Best-effort extraction of sandbox stdout from a tool result."""
@@ -241,6 +269,42 @@ _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
 _direct_evm_keys: Dict[str, str] = {}
 _direct_evm_key_expiry: Dict[str, float] = {}
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+def _sb_headers():
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+def _sb_post(table, payload):
+    if not SUPABASE_URL:
+        raise HTTPException(status_code=500, detail="Supabase not configured")
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.post(url, headers=_sb_headers(), json=payload, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase insert error: {r.text[:200]}")
+
+def _sb_get(table, filters=None):
+    if not SUPABASE_URL:
+        return []
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.get(url, headers=_sb_headers(), params=filters or {}, timeout=30)
+    if r.status_code >= 400:
+        return []
+    return r.json()
+
+def _sb_patch(table, payload, filters):
+    if not SUPABASE_URL:
+        return
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.patch(url, headers=_sb_headers(), json=payload, params=filters, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase update error: {r.text[:200]}")
+
 
 CHAINS = {
     # Mainnets
@@ -301,16 +365,26 @@ def direct_evm_address(chain: str = "polygon"):
 
     payment_id = secrets.randbelow(900000) + 100000
     request_id = secrets.token_hex(8)
-    _direct_evm_requests[request_id] = {
+    subscription_days = int(os.environ.get("SUBSCRIPTION_DAYS", "30"))
+
+    payload = {
+        "request_id": request_id,
         "payment_id": payment_id,
         "chain": chain,
         "amount_wei": amount_wei,
         "amount_native": amount_native,
         "wallet": WALLET_ADDRESS,
         "status": "waiting",
-        "created_at": time.time(),
-        "subscription_days": int(os.environ.get("SUBSCRIPTION_DAYS", "30")),
     }
+
+    if SUPABASE_URL:
+        _sb_post("payment_requests", payload)
+    else:
+        _direct_evm_requests[request_id] = {
+            **payload,
+            "created_at": time.time(),
+            "subscription_days": subscription_days,
+        }
 
     return {
         "request_id": request_id,
@@ -328,117 +402,50 @@ def direct_evm_address(chain: str = "polygon"):
     }
 @app.get("/v1/billing/crypto/verify")
 def direct_evm_verify(tx_hash: str, request_id: str):
-    if request_id not in _direct_evm_requests:
-        raise HTTPException(status_code=404, detail="Payment request not found")
+    if SUPABASE_URL:
+        rows = _sb_get("payment_requests", {"request_id": f"eq.{request_id}"})
+        if not rows:
+            raise HTTPException(status_code=404, detail="Payment request not found")
+        req = rows[0]
+        if req.get("status") == "paid":
+            raise HTTPException(status_code=400, detail="Payment already verified")
+    else:
+        if request_id not in _direct_evm_requests:
+            raise HTTPException(status_code=404, detail="Payment request not found")
+        req = _direct_evm_requests[request_id]
+        if req["status"] == "paid":
+            raise HTTPException(status_code=400, detail="Payment already verified")
 
-    req = _direct_evm_requests[request_id]
-    if req["status"] == "paid":
-        raise HTTPException(status_code=400, detail="Payment already verified")
+    _verify_evm_tx(req["chain"], tx_hash, int(req["amount_wei"]))
 
-    _verify_evm_tx(req["chain"], tx_hash, req["amount_wei"])
-
-    req["status"] = "paid"
     key = "sk_live_" + secrets.token_urlsafe(24)
-    _direct_evm_keys[key] = "evm-paid-user"
+    days = int(os.environ.get("SUBSCRIPTION_DAYS", "30"))
+    expires_at = int(time.time()) + (days * 86400)
 
-    days = req.get("subscription_days", int(os.environ.get("SUBSCRIPTION_DAYS", "30")))
-    _direct_evm_key_expiry[key] = time.time() + (days * 86400)
+    if SUPABASE_URL:
+        _sb_post("paid_keys", {
+            "api_key": key,
+            "email": "crypto-paid-user",
+            "expires_at": expires_at,
+        })
+        _sb_patch("payment_requests", {
+            "status": "paid",
+            "tx_hash": tx_hash,
+        }, {"request_id": f"eq.{request_id}"})
+    else:
+        req["status"] = "paid"
+        _direct_evm_keys[key] = "evm-paid-user"
+        _direct_evm_key_expiry[key] = expires_at
 
     return {
         "status": "paid",
         "api_key": key,
         "request_id": request_id,
         "chain": req["chain"],
-        "amount_paid": req["amount_native"],
+        "amount_paid": float(req["amount_native"]),
         "expires_in_days": days,
-        "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_direct_evm_key_expiry[key])),
+        "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at)),
     }
-CHECKOUT_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Python Agent API Access</title>
-  <style>
-    body { font-family: system-ui, sans-serif; background:#0b0f19; color:#e6e8ee; max-width:560px; margin:3rem auto; padding:0 1rem; }
-    h1 { color:#7c8cf8; }
-    .card { background:#141a2b; border:1px solid #26304a; border-radius:18px; padding:1.5rem; margin-bottom:1rem; }
-    code { background:#0f1524; padding:0.35rem 0.6rem; border-radius:8px; word-break:break-all; }
-    input { width:100%; padding:0.8rem; border-radius:10px; border:1px solid #2b3652; background:#0f1524; color:white; margin-bottom:1rem; }
-    button { background:#7c8cf8; color:white; border:none; padding:0.8rem 1.2rem; border-radius:10px; font-weight:700; cursor:pointer; width:100%; }
-    #result { margin-top:1rem; white-space:pre-wrap; }
-  </style>
-</head>
-<body id="checkout-page">
-  <h1>🐍 Python Agent API Access</h1>
-  <p>Pay <b>469 POL</b> to receive a paid API key valid for 30 days.</p>
-
-  <div class="card">
-    <p><b>Chain:</b> <span id="chain">POLYGON (POL)</span></p>
-    <p><b>Pay exactly:</b><br><code id="amount">469 POL</code></p>
-    <p><b>To wallet:</b><br><code id="wallet">0x12133a4f996bdc9d2894b441e1f8621b499d2c3c</code></p>
-    <p><b>Request ID:</b> <span id="request_id">LOADING</span></p>
-  </div>
-
-  <div class="card">
-    <p><b>Step 1:</b> Send exactly <b>469 POL</b> to the wallet above on Polygon.</p>
-    <p><b>Step 2:</b> Paste your transaction hash below.</p>
-    <input type="text" id="tx_hash" placeholder="0x..." />
-    <button onclick="verifyPayment()">Verify Payment & Get API Key</button>
-    <div id="result"></div>
-  </div>
-
-  <script>
-    const INITIAL_PAYMENT = __PAYMENT_JSON__;
-    let currentRequestId = INITIAL_PAYMENT.request_id;
-
-    document.getElementById('chain').innerText = INITIAL_PAYMENT.chain + ' (' + INITIAL_PAYMENT.symbol + ')';
-    document.getElementById('amount').innerText = INITIAL_PAYMENT.amount + ' ' + INITIAL_PAYMENT.symbol;
-    document.getElementById('wallet').innerText = INITIAL_PAYMENT.wallet_address;
-    document.getElementById('request_id').innerText = INITIAL_PAYMENT.request_id;
-
-    async function verifyPayment() {
-      const tx = document.getElementById('tx_hash').value.trim();
-      const resultDiv = document.getElementById('result');
-      if (!tx || !currentRequestId) { resultDiv.innerText = 'Transaction hash missing.'; return; }
-      resultDiv.innerText = 'Verifying...';
-      const resp = await fetch('/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId));
-      const data = await resp.json();
-      if (data.api_key) { resultDiv.innerText = '✅ Payment verified. Your PAID API key is:\n\n' + data.api_key; }
-      else { resultDiv.innerText = JSON.stringify(data, null, 2); }
-    }
-  </script>
-</body>
-</html>
-"""
-
-
-@app.get("/", response_class=HTMLResponse)
-def checkout_page():
-    try:
-        payment = direct_evm_address(chain="polygon")
-        payment_json = json.dumps(payment)
-    except Exception as e:
-        payment = {
-            "request_id": "ERROR",
-            "payment_id": 0,
-            "wallet_address": WALLET_ADDRESS,
-            "chain": "polygon",
-            "symbol": "POL",
-            "amount": 469.0,
-            "amount_wei": 0,
-        }
-        payment_json = json.dumps(payment)
-
-    html = CHECKOUT_HTML.replace("__PAYMENT_JSON__", payment_json)
-    html = html.replace('<span id="chain">POLYGON (POL)</span>', f'<span id="chain">{payment["chain"]} ({payment["symbol"]})</span>')
-    html = html.replace('<code id="amount">469 POL</code>', f'<code id="amount">{payment["amount"]} {payment["symbol"]}</code>')
-    html = html.replace('<code id="wallet">0x12133a4f996bdc9d2894b441e1f8621b499d2c3c</code>', f'<code id="wallet">{payment["wallet_address"]}</code>')
-    html = html.replace('<span id="request_id">LOADING</span>', f'<span id="request_id">{payment["request_id"]}</span>')
-
-    return html
-
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "neuro-symbolic-python-agent"}
