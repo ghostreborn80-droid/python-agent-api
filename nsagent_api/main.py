@@ -552,9 +552,6 @@ CHECKOUT_HTML = """
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
   <title>Python Agent API Access</title>
   <style>
     body { font-family: system-ui, sans-serif; background:#0b0f19; color:#e6e8ee; max-width:560px; margin:3rem auto; padding:0 1rem; }
@@ -563,19 +560,11 @@ CHECKOUT_HTML = """
     code { background:#0f1524; padding:0.35rem 0.6rem; border-radius:8px; word-break:break-all; }
     input { width:100%; padding:0.8rem; border-radius:10px; border:1px solid #2b3652; background:#0f1524; color:white; margin-bottom:1rem; }
     button { background:#7c8cf8; color:white; border:none; padding:0.8rem 1.2rem; border-radius:10px; font-weight:700; cursor:pointer; width:100%; }
-    #error_banner, #result, #trial_result { margin-top:1rem; white-space:pre-wrap; color:#ff9f9f; }
   </style>
 </head>
-<body id="checkout-page">
-  <div id="error_banner"></div>
+<body>
   <h1>🐍 Python Agent API Access</h1>
   <p>Pay <b>469 POL</b> to receive a paid API key valid for 30 days.</p>
-
-  <div class="card" style="border-color:#f0b429">
-    <p><b>JavaScript Test:</b> Click this button. You should see "JS WORKS" appear below.</p>
-    <button type="button" onclick="document.getElementById('js_test_result').innerText='JS WORKS'">Test JavaScript</button>
-    <div id="js_test_result" style="color:#ffd166"></div>
-  </div>
 
   <div class="card">
     <p><b>Free Trial:</b> Get 50 requests for 7 days.</p>
@@ -595,10 +584,10 @@ CHECKOUT_HTML = """
   </div>
 
   <div class="card">
-    <p><b>Chain:</b> <span id="chain">LOADING</span></p>
-    <p><b>Pay exactly:</b><br><code id="amount">LOADING</code></p>
-    <p><b>To wallet:</b><br><code id="wallet">LOADING</code></p>
-    <p><b>Request ID:</b> <span id="request_id">LOADING</span></p>
+    <p><b>Chain:</b> __CHAIN__</p>
+    <p><b>Pay exactly:</b><br><code>__AMOUNT__</code></p>
+    <p><b>To wallet:</b><br><code>__WALLET__</code></p>
+    <p><b>Request ID:</b> __REQUEST_ID__</p>
   </div>
 
   <div class="card">
@@ -610,66 +599,6 @@ CHECKOUT_HTML = """
       <button type="submit">Verify Payment & Get API Key</button>
     </form>
   </div>
-
-  <script>
-    window.onerror = function(msg, src, line) {
-      document.getElementById('error_banner').innerText = 'JS Error: ' + msg + ' line ' + line;
-    };
-
-    var INITIAL_PAYMENT = __PAYMENT_JSON__;
-    var currentRequestId = INITIAL_PAYMENT.request_id;
-
-    document.getElementById('chain').innerText = INITIAL_PAYMENT.chain + ' (' + INITIAL_PAYMENT.symbol + ')';
-    document.getElementById('amount').innerText = INITIAL_PAYMENT.amount + ' ' + INITIAL_PAYMENT.symbol;
-    document.getElementById('wallet').innerText = INITIAL_PAYMENT.wallet_address;
-    document.getElementById('request_id').innerText = INITIAL_PAYMENT.request_id;
-
-    function getFreeTrial() {
-      var resultDiv = document.getElementById('trial_result');
-      resultDiv.innerText = 'Requesting trial...';
-      fetch('/v1/billing/free-trial', {method: 'POST'})
-        .then(function(resp) { return resp.json(); })
-        .then(function(data) {
-          if (data.api_key) {
-            resultDiv.innerText = 'Trial key: ' + data.api_key + '
-Requests: ' + data.quota_limit + '
-Expires: ' + data.expires_in_days + ' days';
-          } else {
-            resultDiv.innerText = JSON.stringify(data, null, 2);
-          }
-        })
-        .catch(function(err) {
-          resultDiv.innerText = 'Error: ' + err.message;
-        });
-    }
-
-    function verifyPayment() {
-      var tx = document.getElementById('tx_hash').value.trim();
-      var resultDiv = document.getElementById('result');
-      if (!tx || !currentRequestId) {
-        resultDiv.innerText = 'Transaction hash missing.';
-        return;
-      }
-      resultDiv.innerText = 'Verifying...';
-      var url = '/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId);
-      fetch(url)
-        .then(function(resp) { return resp.json(); })
-        .then(function(data) {
-          if (data.api_key) {
-            resultDiv.innerText = '✅ Payment verified. Your PAID API key is:
-
-' + data.api_key + '
-
-' + data.usage;
-          } else {
-            resultDiv.innerText = JSON.stringify(data, null, 2);
-          }
-        })
-        .catch(function(err) {
-          resultDiv.innerText = 'Error: ' + err.message;
-        });
-    }
-  </script>
 </body>
 </html>
 """
@@ -678,28 +607,21 @@ Expires: ' + data.expires_in_days + ' days';
 def checkout_page():
     try:
         payment = direct_evm_address(chain="polygon")
-        payment_json = json.dumps(payment)
     except Exception:
         payment = {
             "request_id": "ERROR",
-            "payment_id": 0,
             "wallet_address": WALLET_ADDRESS,
             "chain": "polygon",
             "symbol": "POL",
             "amount": 469.0,
-            "amount_wei": 0,
         }
-        payment_json = json.dumps(payment)
 
-    html = CHECKOUT_HTML.replace("__PAYMENT_JSON__", payment_json)
+    html = CHECKOUT_HTML
+    html = html.replace("__CHAIN__", f"{payment['chain']} ({payment['symbol']})")
+    html = html.replace("__AMOUNT__", f"{payment['amount']} {payment['symbol']}")
+    html = html.replace("__WALLET__", payment["wallet_address"])
     html = html.replace("__REQUEST_ID__", payment["request_id"])
-    html = html.replace('<span id="chain">LOADING</span>', f'<span id="chain">{payment["chain"]} ({payment["symbol"]})</span>')
-    html = html.replace('<code id="amount">LOADING</code>', f'<code id="amount">{payment["amount"]} {payment["symbol"]}</code>')
-    html = html.replace('<code id="wallet">LOADING</code>', f'<code id="wallet">{payment["wallet_address"]}</code>')
-    html = html.replace('<span id="request_id">LOADING</span>', f'<span id="request_id">{payment["request_id"]}</span>')
     return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
-
-
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "neuro-symbolic-python-agent"}
