@@ -474,9 +474,24 @@ def _to_response(result: Dict[str, Any], request_type: str) -> AgentResponse:
     if rtype == "tool_result":
         tool_res = result.get("result")
         if tool_res is not None:
+            tool = getattr(tool_res, "tool", None)
+
+            # For python_knowledge and python_stdlib, the useful answer is
+            # stored in tool_res.result as a string.
+            if tool in ("python_knowledge", "python_stdlib"):
+                inner = getattr(tool_res, "result", None)
+                if isinstance(inner, str):
+                    return AgentResponse(
+                        request_type=request_type,
+                        message=inner[:4000],
+                        trace=trace,
+                        output=None,
+                        tool=tool,
+                        status="ok" if getattr(tool_res, "ok", False) else "error",
+                    )
+
             message = getattr(tool_res, "message", "") or str(tool_res)
             output = _extract_stdout(tool_res)
-            tool = getattr(tool_res, "tool", None)
             return AgentResponse(
                 request_type=request_type,
                 message=message,
