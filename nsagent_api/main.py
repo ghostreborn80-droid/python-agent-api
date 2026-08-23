@@ -60,6 +60,7 @@ _quota: Dict[str, Dict[str, int]] = {}
 _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
 _direct_evm_keys: Dict[str, str] = {}
 _direct_evm_key_expiry: Dict[str, float] = {}
+_trial_keys: Dict[str, Dict] = {}
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -159,18 +160,49 @@ def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
     if x_api_key in paid_keys:
         return x_api_key
 
+    # Trial keys with quota.
     if SUPABASE_URL:
-        rows = _sb_get("paid_keys", {
+        trial_rows = _sb_get("trial_keys", {
             "api_key": f"eq.{x_api_key}",
             "expires_at": f"gt.{int(time.time())}",
         })
-        if rows:
+        if trial_rows:
+            row = trial_rows[0]
+            used = int(row.get("quota_used", 0))
+            limit = int(row.get("quota_limit", 50))
+            if used >= limit:
+                raise HTTPException(status_code=429, detail="Free trial quota exhausted. Upgrade to paid plan.")
+            _sb_patch("trial_keys", {"quota_used": used + 1}, {"api_key": f"eq.{x_api_key}"})
             return x_api_key
 
-        any_rows = _sb_get("paid_keys", {"api_key": f"eq.{x_api_key}"})
-        if any_rows:
+        expired_trial = _sb_get("trial_keys", {"api_key": f"eq.{x_api_key}"})
+        if expired_trial:
+            raise HTTPException(status_code=401, detail="Free trial expired. Upgrade to paid plan.")
+
+    # In-memory trial fallback.
+    if x_api_key in _trial_keys:
+        trial = _trial_keys[x_api_key]
+        if time.time() > trial["expires_at"]:
+            raise HTTPException(status_code=401, detail="Free trial expired. Upgrade to paid plan.")
+        if trial["quota_used"] >= trial["quota_limit"]:
+            raise HTTPException(status_code=429, detail="Free trial quota exhausted. Upgrade to paid plan.")
+        trial["quota_used"] += 1
+        return x_api_key
+
+    # Paid keys from Supabase.
+    if SUPABASE_URL:
+        paid_rows = _sb_get("paid_keys", {
+            "api_key": f"eq.{x_api_key}",
+            "expires_at": f"gt.{int(time.time())}",
+        })
+        if paid_rows:
+            return x_api_key
+
+        any_paid = _sb_get("paid_keys", {"api_key": f"eq.{x_api_key}"})
+        if any_paid:
             raise HTTPException(status_code=401, detail="API key expired. Pay for another month.")
 
+    # In-memory paid fallback.
     if "_direct_evm_keys" in globals() and x_api_key in _direct_evm_keys:
         expiry = _direct_evm_key_expiry.get(x_api_key)
         if expiry and time.time() > expiry:
@@ -178,29 +210,6 @@ def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
         return x_api_key
 
     raise HTTPException(status_code=401, detail="Invalid API key.")
-
-
-
-# ---------------------------------------------------------------- schemas
-class AskPythonRequest(BaseModel):
-    question: str = Field(..., min_length=3, max_length=500)
-
-
-class GenerateScriptRequest(BaseModel):
-    task: str = Field(..., min_length=3, max_length=500)
-
-
-class CodebaseQueryRequest(BaseModel):
-    question: str = Field(..., min_length=3, max_length=500)
-
-
-class AgentResponse(BaseModel):
-    request_type: str
-    message: str
-    trace: List[str] = []
-    output: Optional[str] = None
-    tool: Optional[str] = None
-    status: str = "ok"
 
 def _extract_stdout(result: Any) -> Optional[str]:
     """Best-effort extraction of sandbox stdout from a tool result."""
@@ -327,6 +336,7 @@ CHAINS = {"ethereum": {"rpc": "https://eth.llamarpc.com", "chain_id": 1, "decima
 _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
 _direct_evm_keys: Dict[str, str] = {}
 _direct_evm_key_expiry: Dict[str, float] = {}
+_trial_keys: Dict[str, Dict] = {}
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -447,6 +457,36 @@ def _verify_evm_tx(chain: str, tx_hash: str, expected_wei: int) -> bool:
     if tx["value"] != expected_wei:
         raise HTTPException(status_code=400, detail=f"Transaction amount mismatch. Expected {expected_wei} wei, got {tx['value']}")
     return True
+
+
+@app.post("/v1/billing/free-trial")
+def create_free_trial():
+    key = "sk_trial_" + secrets.token_urlsafe(24)
+    days = int(os.environ.get("TRIAL_DAYS", "7"))
+    quota_limit = int(os.environ.get("TRIAL_QUOTA", "50"))
+    expires_at = int(time.time()) + (days * 86400)
+
+    if SUPABASE_URL:
+        _sb_post("trial_keys", {
+            "api_key": key,
+            "email": "free-trial",
+            "expires_at": expires_at,
+            "quota_limit": quota_limit,
+            "quota_used": 0,
+        })
+    else:
+        _trial_keys[key] = {
+            "expires_at": expires_at,
+            "quota_limit": quota_limit,
+            "quota_used": 0,
+        }
+
+    return {
+        "status": "trial_created",
+        "api_key": key,
+        "expires_in_days": days,
+        "quota_limit": quota_limit,
+    }
 
 
 @app.get("/v1/billing/crypto/direct-address")
@@ -577,6 +617,25 @@ CHECKOUT_HTML = """
     <div id="result"></div>
   </div>
 
+  <div class="card">
+    <p><b>Free Trial:</b> Get 50 requests for 7 days.</p>
+    <button onclick="getFreeTrial()">Get Free Trial API Key</button>
+    <div id="trial_result"></div>
+  </div>
+
+  <script>
+    async function getFreeTrial() {
+      const resultDiv = document.getElementById('trial_result');
+      resultDiv.innerText = 'Requesting trial...';
+      const resp = await fetch('/v1/billing/free-trial', {method: 'POST'});
+      const data = await resp.json();
+      if (data.api_key) {
+        resultDiv.innerText = 'Trial key: ' + data.api_key + '\nRequests: ' + data.quota_limit + '\nExpires: ' + data.expires_in_days + ' days';
+      } else {
+        resultDiv.innerText = JSON.stringify(data, null, 2);
+      }
+    }
+  </script>
   <script>
     const INITIAL_PAYMENT = __PAYMENT_JSON__;
     let currentRequestId = INITIAL_PAYMENT.request_id;
