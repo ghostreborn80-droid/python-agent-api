@@ -24,8 +24,11 @@ WALLET_ADDRESS = os.environ.get(
 CHAINS = {
     "polygon": {
         "rpcs": [
-            "https://polygon.llamarpc.com",
+            "https://polygon-bor-rpc.publicnode.com",
+            "https://polygon.drpc.org",
+            "https://1rpc.io/matic",
             "https://polygon-rpc.com",
+            "https://polygon.llamarpc.com",
             "https://rpc.ankr.com/polygon",
         ],
         "chain_id": 137,
