@@ -97,6 +97,42 @@ def _sb_patch(table, payload, filters):
     if r.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Supabase update error: {r.text[:200]}")
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+def _sb_headers():
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+def _sb_post(table, payload):
+    if not SUPABASE_URL:
+        raise HTTPException(status_code=500, detail="Supabase not configured")
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.post(url, headers=_sb_headers(), json=payload, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase insert error: {r.text[:200]}")
+
+def _sb_get(table, filters=None):
+    if not SUPABASE_URL:
+        return []
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.get(url, headers=_sb_headers(), params=filters or {}, timeout=30)
+    if r.status_code >= 400:
+        return []
+    return r.json()
+
+def _sb_patch(table, payload, filters):
+    if not SUPABASE_URL:
+        return
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.patch(url, headers=_sb_headers(), json=payload, params=filters, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase update error: {r.text[:200]}")
+
 
 def check_quota(api_key: str) -> None:
     now = int(time.time())
@@ -268,6 +304,42 @@ CHAINS = {"ethereum": {"rpc": "https://eth.llamarpc.com", "chain_id": 1, "decima
 _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
 _direct_evm_keys: Dict[str, str] = {}
 _direct_evm_key_expiry: Dict[str, float] = {}
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+def _sb_headers():
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+def _sb_post(table, payload):
+    if not SUPABASE_URL:
+        raise HTTPException(status_code=500, detail="Supabase not configured")
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.post(url, headers=_sb_headers(), json=payload, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase insert error: {r.text[:200]}")
+
+def _sb_get(table, filters=None):
+    if not SUPABASE_URL:
+        return []
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.get(url, headers=_sb_headers(), params=filters or {}, timeout=30)
+    if r.status_code >= 400:
+        return []
+    return r.json()
+
+def _sb_patch(table, payload, filters):
+    if not SUPABASE_URL:
+        return
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    r = requests.patch(url, headers=_sb_headers(), json=payload, params=filters, timeout=30)
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase update error: {r.text[:200]}")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
