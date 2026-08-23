@@ -253,10 +253,17 @@ CHAINS = {
 }
 
 def _make_payment_amount(payment_id: int, decimals: int) -> int:
-    """Return amount in wei: 0.001 + payment_id embedded in micro-units."""
-    base = 1 * 10 ** (decimals - 3)  # 0.001 native coin
-    micro = payment_id % (10 ** 6)
-    return base + micro * 10 ** (decimals - 12)  # allows 6-digit id after decimal
+    """Real payment amount in wei.
+
+    Base amount is read from PAYMENT_AMOUNT_NATIVE env (default 29 MATIC).
+    We add the payment id as 6 decimal digits so each invoice is unique.
+    """
+    amount_native = float(os.environ.get("PAYMENT_AMOUNT_NATIVE", "29"))
+    base_wei = int(amount_native * (10 ** decimals))
+    micro_native = (payment_id % 1_000_000) / 1_000_000
+    micro_wei = int(micro_native * (10 ** decimals))
+    return base_wei + micro_wei
+
 
 
 def _verify_evm_tx(chain: str, tx_hash: str, expected_wei: int) -> bool:
@@ -279,7 +286,8 @@ def _verify_evm_tx(chain: str, tx_hash: str, expected_wei: int) -> bool:
 
 
 @app.get("/v1/billing/crypto/direct-address")
-def direct_evm_address(chain: str = "ethereum"):
+def direct_evm_address(chain: Optional[str] = None):
+    chain = chain or os.environ.get("PAYMENT_CHAIN", "polygon")
     if chain not in CHAINS:
         raise HTTPException(status_code=400, detail=f"Unsupported chain: {chain}. Available: {list(CHAINS)}")
 
@@ -411,7 +419,7 @@ CHECKOUT_HTML = """
 @app.get("/", response_class=HTMLResponse)
 def checkout_page():
     try:
-        payment = direct_evm_address(chain="polygon-amoy")
+        payment = direct_evm_address()
         payment_json = json.dumps(payment)
     except Exception as e:
         payment = {
