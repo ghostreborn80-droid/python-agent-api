@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from web3 import Web3
 
+from nsagent.sandbox import RealSandbox
 from nsagent.db_retriever import DatabaseRetriever
 from nsagent.expert import PythonExpertAgent
 
@@ -369,6 +370,11 @@ class CodebaseQueryRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=500)
 
 
+class ExecutePythonRequest(BaseModel):
+    code: str = Field(..., min_length=1, max_length=4000)
+    timeout: int = 20
+
+
 class AgentResponse(BaseModel):
     request_type: str
     message: str
@@ -423,6 +429,33 @@ def codebase_query(req: CodebaseQueryRequest, x_api_key: Optional[str] = Header(
     require_api_key(x_api_key)
     result = get_expert().answer(req.question)
     return _to_response(result, "codebase_query")
+
+
+@app.post("/v1/execute-python")
+def execute_python(req: ExecutePythonRequest, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    require_api_key(x_api_key)
+
+    code = req.code.strip()
+    if code.startswith("```"):
+        code = code.strip("`").removeprefix("python").strip()
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Code cannot be empty.")
+
+    sandbox = RealSandbox(
+        project_root=os.environ.get("AGENT_PROJECT_ROOT", "/app/sample_project")
+    )
+    filename = f"execute_{secrets.token_hex(4)}.py"
+    res = sandbox.run_code(code, filename=filename, timeout=req.timeout)
+
+    return {
+        "request_type": "execute_python",
+        "status": "ok" if res.success else "error",
+        "returncode": res.returncode,
+        "stdout": (res.stdout or "").strip()[:2000],
+        "stderr": (res.stderr or "").strip()[:2000],
+        "timed_out": res.timed_out,
+    }
 
 
 CHECKOUT_HTML = """
