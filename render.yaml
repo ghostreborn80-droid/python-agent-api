@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: python-agent-api
+    runtime: docker
+    plan: free
+    envVars:
+      - key: AGENT_PROJECT_ROOT
+        value: /app/sample_project
+      - key: AGENT_STATE_PATH
+        value: /app/agent_state/final_model_v3.json

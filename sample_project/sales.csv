@@ -1,0 +1,11 @@
+order_id,date,region,product,quantity,revenue
+1001,2024-01-05,north,Widget,3,45.0
+1002,2024-01-07,South,Gadget,2,30.0
+1003,2024-01-09,,Widget,1,15.0
+1004,2024-01-11,NORTH,Gadget,4,
+1005,2024-01-13,south,Doodad,2,10.0
+1006,2024-01-15,east,Widget,5,75.0
+1007,2024-01-17,west,Gadget,1,15.0
+1008,,west,Doodad,2,20.0
+1009,2024-01-21,north,Widget,0,0.0
+1010,2024-01-23,SOUTH,Gadget,3,45.0
