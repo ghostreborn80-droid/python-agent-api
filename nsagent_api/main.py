@@ -569,7 +569,7 @@ CHECKOUT_HTML = """
 
   <div class="card">
     <p><b>Free Trial:</b> Get 50 requests for 7 days.</p>
-    <button onclick="getFreeTrial()">Get Free Trial API Key</button>
+    <button type="button" id="btn_free_trial">Get Free Trial API Key</button>
     <div id="trial_result"></div>
   </div>
 
@@ -594,7 +594,7 @@ CHECKOUT_HTML = """
     <p><b>Step 1:</b> Send exactly <b>469 POL</b> to the wallet above on Polygon.</p>
     <p><b>Step 2:</b> Paste your transaction hash below.</p>
     <input type="text" id="tx_hash" placeholder="0x..." />
-    <button onclick="verifyPayment()">Verify Payment & Get API Key</button>
+    <button type="button" id="btn_verify_payment">Verify Payment & Get API Key</button>
     <div id="result"></div>
   </div>
 
@@ -635,6 +635,10 @@ CHECKOUT_HTML = """
         resultDiv.innerText = JSON.stringify(data, null, 2);
       }
     }
+  </script>
+  <script>
+    document.getElementById('btn_free_trial').addEventListener('click', getFreeTrial);
+    document.getElementById('btn_verify_payment').addEventListener('click', verifyPayment);
   </script>
 </body>
 </html>
