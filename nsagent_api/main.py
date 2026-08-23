@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import json
 import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -358,12 +359,14 @@ CHECKOUT_HTML = """
 <body id="checkout-page">
   <h1>🐍 Python Agent API Access</h1>
   <p>Pay in crypto to receive a paid API key.</p>
+
   <div class="card">
     <p><b>Chain:</b> <span id="chain">...</span></p>
     <p><b>Pay exactly:</b><br><code id="amount">...</code></p>
     <p><b>To wallet:</b><br><code id="wallet">...</code></p>
     <p><b>Request ID:</b> <span id="request_id"></span></p>
   </div>
+
   <div class="card">
     <p><b>Step 1:</b> Send the exact amount above.</p>
     <p><b>Step 2:</b> Paste your transaction hash below.</p>
@@ -371,28 +374,34 @@ CHECKOUT_HTML = """
     <button onclick="verifyPayment()">Verify Payment & Get API Key</button>
     <div id="result"></div>
   </div>
+
   <script>
-    let currentRequestId = null;
-    async function loadPayment() {
-      const resp = await fetch('/v1/billing/crypto/direct-address?chain=polygon-amoy');
-      const data = await resp.json();
-      currentRequestId = data.request_id;
-      document.getElementById('chain').innerText = data.chain + ' (' + data.symbol + ')';
-      document.getElementById('amount').innerText = data.amount + ' ' + data.symbol;
-      document.getElementById('wallet').innerText = data.wallet_address;
-      document.getElementById('request_id').innerText = data.request_id;
-    }
+    const INITIAL_PAYMENT = __PAYMENT_JSON__;
+    let currentRequestId = INITIAL_PAYMENT.request_id;
+
+    document.getElementById('chain').innerText = INITIAL_PAYMENT.chain + ' (' + INITIAL_PAYMENT.symbol + ')';
+    document.getElementById('amount').innerText = INITIAL_PAYMENT.amount + ' ' + INITIAL_PAYMENT.symbol;
+    document.getElementById('wallet').innerText = INITIAL_PAYMENT.wallet_address;
+    document.getElementById('request_id').innerText = INITIAL_PAYMENT.request_id;
+
     async function verifyPayment() {
       const tx = document.getElementById('tx_hash').value.trim();
       const resultDiv = document.getElementById('result');
-      if (!tx || !currentRequestId) { resultDiv.innerText = 'Transaction hash missing.'; return; }
+      if (!tx || !currentRequestId) {
+        resultDiv.innerText = 'Transaction hash missing or payment request not loaded.';
+        return;
+      }
       resultDiv.innerText = 'Verifying...';
       const resp = await fetch('/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId));
       const data = await resp.json();
-      if (data.api_key) { resultDiv.innerText = '✅ Payment verified. Your PAID API key is:\n\n' + data.api_key; }
-      else { resultDiv.innerText = JSON.stringify(data, null, 2); }
+      if (data.api_key) {
+        resultDiv.innerText = '✅ Payment verified. Your PAID API key is:
+
+' + data.api_key;
+      } else {
+        resultDiv.innerText = JSON.stringify(data, null, 2);
+      }
     }
-    loadPayment();
   </script>
 </body>
 </html>
@@ -401,7 +410,12 @@ CHECKOUT_HTML = """
 
 @app.get("/", response_class=HTMLResponse)
 def checkout_page():
-    return CHECKOUT_HTML
+    try:
+        payment = direct_evm_address(chain="polygon-amoy")
+        payment_json = json.dumps(payment)
+    except Exception as e:
+        payment_json = json.dumps({"error": str(e)})
+    return CHECKOUT_HTML.replace("__PAYMENT_JSON__", payment_json)
 
 @app.get("/health")
 def health():
