@@ -16,6 +16,12 @@ COPY nsagent_api /app/nsagent_api
 COPY sample_project /app/sample_project
 COPY agent_data /app/agent_data
 
+# Render compatibility: agent code may reference /content paths.
+RUN mkdir -p /content && \
+    mkdir -p /app/nsagent_runtime && \
+    ln -s /app/agent_data /content/agent_data && \
+    ln -s /app/nsagent_runtime /content/nsagent_runtime
+
 ENV PYTHONPATH=/app
 ENV AGENT_PROJECT_ROOT=/app/sample_project
 ENV AGENT_STATE_PATH=/app/agent_state/final_model_v3.json
