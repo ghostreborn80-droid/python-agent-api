@@ -385,6 +385,14 @@ def direct_evm_address(chain: str = "polygon"):
 @app.get("/v1/billing/crypto/verify")
 def direct_evm_verify(tx_hash: str, request_id: str):
     if SUPABASE_URL:
+        # Global protection: a transaction hash may only be used once.
+        reused = _sb_get("payment_requests", {
+            "tx_hash": f"eq.{tx_hash}",
+            "status": "eq.paid",
+        })
+        if reused:
+            raise HTTPException(status_code=400, detail="Transaction already used for a previous payment.")
+
         rows = _sb_get("payment_requests", {"request_id": f"eq.{request_id}"})
         if not rows:
             raise HTTPException(status_code=404, detail="Payment request not found")
@@ -392,6 +400,11 @@ def direct_evm_verify(tx_hash: str, request_id: str):
         if req.get("status") == "paid":
             raise HTTPException(status_code=400, detail="Payment already verified")
     else:
+        # In-memory fallback global protection.
+        for _rid, _req in _direct_evm_requests.items():
+            if _req.get("tx_hash") == tx_hash and _req.get("status") == "paid":
+                raise HTTPException(status_code=400, detail="Transaction already used for a previous payment.")
+
         if request_id not in _direct_evm_requests:
             raise HTTPException(status_code=404, detail="Payment request not found")
         req = _direct_evm_requests[request_id]
