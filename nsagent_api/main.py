@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from web3 import Web3
 
 from nsagent.agent import NeuroSymbolicAgent
+from nsagent.expert import PythonExpertAgent
 
 
 WALLET_ADDRESS = os.environ.get(
@@ -174,6 +175,20 @@ def get_agent() -> NeuroSymbolicAgent:
         state_path = os.environ.get("AGENT_STATE_PATH", "/app/agent_state/final_model_v3.json")
         _AGENT = NeuroSymbolicAgent(project_root=project_root, state_path=state_path)
     return _AGENT
+
+
+def get_expert() -> PythonExpertAgent:
+    global _EXPERT
+    if _EXPERT is None:
+        db_path = os.environ.get("PYTHON_KNOWLEDGE_DB", "/app/agent_data/python_knowledge.db")
+        skills_db_path = os.environ.get("SKILLS_DB", "/app/agent_data/full_training_runs.db")
+        project_root = os.environ.get("AGENT_PROJECT_ROOT", "/app/sample_project")
+        _EXPERT = PythonExpertAgent(
+            db_path=db_path,
+            skills_db_path=skills_db_path,
+            project_root=project_root,
+        )
+    return _EXPERT
 
 
 # ---------------------------------------------------------------- API key auth
@@ -539,16 +554,14 @@ def _to_response(result: Dict[str, Any], request_type: str) -> AgentResponse:
 @app.post("/v1/ask-python", response_model=AgentResponse)
 def ask_python(req: AskPythonRequest, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     require_api_key(x_api_key)
-    agent = get_agent()
-    result = agent.handle(req.question)
+    result = get_expert().answer(req.question)
     return _to_response(result, "ask_python")
 
 
 @app.post("/v1/generate-script", response_model=AgentResponse)
 def generate_script(req: GenerateScriptRequest, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     require_api_key(x_api_key)
-    agent = get_agent()
-    result = agent.handle(req.task)
+    result = get_expert().generate(req.task)
     return _to_response(result, "generate_script")
 
 
