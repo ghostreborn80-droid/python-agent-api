@@ -552,6 +552,9 @@ CHECKOUT_HTML = """
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Python Agent API Access</title>
   <style>
     body { font-family: system-ui, sans-serif; background:#0b0f19; color:#e6e8ee; max-width:560px; margin:3rem auto; padding:0 1rem; }
@@ -560,6 +563,7 @@ CHECKOUT_HTML = """
     code { background:#0f1524; padding:0.35rem 0.6rem; border-radius:8px; word-break:break-all; }
     input { width:100%; padding:0.8rem; border-radius:10px; border:1px solid #2b3652; background:#0f1524; color:white; margin-bottom:1rem; }
     button { background:#7c8cf8; color:white; border:none; padding:0.8rem 1.2rem; border-radius:10px; font-weight:700; cursor:pointer; width:100%; }
+    .result { margin-top:1rem; white-space:pre-wrap; color:#ffd166; }
   </style>
 </head>
 <body>
@@ -568,9 +572,8 @@ CHECKOUT_HTML = """
 
   <div class="card">
     <p><b>Free Trial:</b> Get 50 requests for 7 days.</p>
-    <form action="/v1/billing/free-trial" method="post" target="_blank">
-      <button type="submit">Get Free Trial API Key</button>
-    </form>
+    <button type="button" onclick="getFreeTrial()">Get Free Trial API Key</button>
+    <div id="trial_result" class="result"></div>
   </div>
 
   <div class="card">
@@ -587,18 +590,62 @@ CHECKOUT_HTML = """
     <p><b>Chain:</b> __CHAIN__</p>
     <p><b>Pay exactly:</b><br><code>__AMOUNT__</code></p>
     <p><b>To wallet:</b><br><code>__WALLET__</code></p>
-    <p><b>Request ID:</b> __REQUEST_ID__</p>
+    <p><b>Request ID:</b> <span id="current_request_id">__REQUEST_ID__</span></p>
   </div>
 
   <div class="card">
     <p><b>Step 1:</b> Send exactly <b>469 POL</b> to the wallet above on Polygon.</p>
     <p><b>Step 2:</b> Paste your transaction hash below.</p>
-    <form action="/v1/billing/crypto/verify" method="get" target="_blank">
-      <input type="text" name="tx_hash" placeholder="0x..." required>
-      <input type="hidden" name="request_id" value="__REQUEST_ID__">
-      <button type="submit">Verify Payment & Get API Key</button>
-    </form>
+    <input type="text" id="tx_hash" placeholder="0x..." required>
+    <button type="button" onclick="verifyPayment()">Verify Payment & Get API Key</button>
+    <div id="result" class="result"></div>
   </div>
+
+  <script>
+    function show(divId, text) {
+      document.getElementById(divId).innerText = text;
+    }
+
+    function getFreeTrial() {
+      show('trial_result', 'Requesting trial...');
+      fetch('/v1/billing/free-trial', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+          if (data.api_key) {
+            show('trial_result', `Trial key: ${data.api_key}
+Requests: ${data.quota_limit}
+Expires: ${data.expires_in_days} days`);
+          } else {
+            show('trial_result', JSON.stringify(data, null, 2));
+          }
+        })
+        .catch(e => show('trial_result', 'Error: ' + e.message));
+    }
+
+    function verifyPayment() {
+      var tx = document.getElementById('tx_hash').value.trim();
+      var rid = document.getElementById('current_request_id').innerText;
+      if (!tx) {
+        show('result', 'Transaction hash missing.');
+        return;
+      }
+      show('result', 'Verifying...');
+      var url = '/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(rid);
+      fetch(url)
+        .then(r => r.json())
+        .then(data => {
+          if (data.api_key) {
+            show('result', `✅ Payment verified. Your PAID API key is:
+${data.api_key}
+
+${data.usage}`);
+          } else {
+            show('result', JSON.stringify(data, null, 2));
+          }
+        })
+        .catch(e => show('result', 'Error: ' + e.message));
+    }
+  </script>
 </body>
 </html>
 """
