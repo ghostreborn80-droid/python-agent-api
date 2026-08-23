@@ -48,18 +48,14 @@ CHAINS = {
     },
 }
 
-
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 app = FastAPI(
     title="Neuro-Symbolic Python Agent API",
-    version="6.0.0",
-    description="Self-trained Python expert + crypto subscription API.",
+    version="7.0.0",
+    description="Self-trained retrieval Python expert + crypto subscription API.",
 )
-
-
-
 
 _expert: Optional[PythonExpertAgent] = None
 _trial_keys: Dict[str, Dict[str, Any]] = {}
@@ -361,7 +357,6 @@ def direct_evm_verify(tx_hash: str, request_id: str):
     }
 
 
-# ---------------------------------------------------------------- schemas
 class AskPythonRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=500)
 
@@ -430,7 +425,6 @@ def codebase_query(req: CodebaseQueryRequest, x_api_key: Optional[str] = Header(
     return _to_response(result, "codebase_query")
 
 
-# ---------------------------------------------------------------- checkout UI
 CHECKOUT_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -494,7 +488,7 @@ CHECKOUT_HTML = """
         .then(r => r.json())
         .then(data => {
           if (data.api_key) {
-            show('trial_result', 'Trial key: ' + data.api_key + '\nRequests: ' + data.quota_limit + '\nExpires: ' + data.expires_in_days + ' days');
+            show('trial_result', 'Trial key: ' + data.api_key + '\\nRequests: ' + data.quota_limit + '\\nExpires: ' + data.expires_in_days + ' days');
           } else {
             show('trial_result', JSON.stringify(data, null, 2));
           }
