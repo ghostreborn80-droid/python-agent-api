@@ -133,7 +133,7 @@ def _sb_patch(table: str, payload: dict, filters: dict):
 
 app = FastAPI(
     title="Neuro-Symbolic Python Agent API",
-    version="3.0.0",
+    version="4.0.0",
     description="Python code generation, knowledge, codebase intelligence, and crypto subscriptions.",
 )
 
@@ -173,7 +173,7 @@ def get_agent() -> NeuroSymbolicAgent:
     return _AGENT
 
 
-# ---------------------------------------------------------------- api key auth
+# ---------------------------------------------------------------- API key auth
 def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
     if not x_api_key:
         raise HTTPException(status_code=401, detail="Missing X-API-Key header.")
@@ -277,9 +277,8 @@ def create_free_trial(request: Request):
     else:
         ip = request.client.host if request.client else "unknown"
 
-    # If Supabase is configured, enforce one trial per IP per 7 days.
+    # Enforce one trial per IP per 7 days when Supabase is configured.
     if SUPABASE_URL:
-        # Return active trial for the same IP if one already exists.
         active_rows = _sb_get("trial_keys", {
             "ip_address": f"eq.{ip}",
             "expires_at": f"gt.{int(time.time())}",
@@ -289,22 +288,18 @@ def create_free_trial(request: Request):
             return {
                 "status": "trial_already_exists",
                 "api_key": row["api_key"],
-                "expires_in_days": 7,
+                "expires_in_days": int(os.environ.get("TRIAL_DAYS", "7")),
                 "quota_limit": int(row.get("quota_limit", 50)),
                 "message": "Returning your existing active trial key.",
             }
 
-        # Block if trial was created within the last 7 days but now expired.
         recent_rows = _sb_get("trial_keys", {"ip_address": f"eq.{ip}"})
         if recent_rows:
-            created_at = recent_rows[0].get("created_at", "")
-            # If any recent trial exists, block new trial creation.
             return {
                 "status": "trial_already_used",
                 "message": "A free trial has already been claimed from this device/IP.",
             }
 
-    # Create new trial key.
     key = "sk_trial_" + secrets.token_urlsafe(24)
     days = int(os.environ.get("TRIAL_DAYS", "7"))
     quota_limit = int(os.environ.get("TRIAL_QUOTA", "50"))
@@ -326,12 +321,16 @@ def create_free_trial(request: Request):
             "quota_used": 0,
         }
 
+    usage = "Use your API key in the X-API-Key header."
     return {
         "status": "trial_created",
         "api_key": key,
         "expires_in_days": days,
         "quota_limit": quota_limit,
+        "usage": usage,
     }
+
+
 @app.get("/v1/billing/crypto/direct-address")
 def direct_evm_address(chain: str = "polygon"):
     if chain not in CHAINS:
@@ -417,6 +416,7 @@ def direct_evm_verify(tx_hash: str, request_id: str):
         _direct_evm_keys[key] = "evm-paid-user"
         _direct_evm_key_expiry[key] = expires_at
 
+    usage = "Use your API key in the X-API-Key header."
     return {
         "status": "paid",
         "api_key": key,
@@ -425,6 +425,7 @@ def direct_evm_verify(tx_hash: str, request_id: str):
         "amount_paid": float(req["amount_native"]),
         "expires_in_days": days,
         "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at)),
+        "usage": usage,
     }
 
 
@@ -557,6 +558,16 @@ CHECKOUT_HTML = """
   </div>
 
   <div class="card">
+    <p><b>How to use your API key:</b></p>
+    <p>Send requests with your key in the <code>X-API-Key</code> header.</p>
+    <p>Example:</p>
+    <code>curl -X POST https://python-agent-api.onrender.com/v1/ask-python \<br>
+    -H "X-API-Key: YOUR_KEY" \<br>
+    -H "Content-Type: application/json" \<br>
+    -d '{"question":"What is a Python decorator?"}'</code>
+  </div>
+
+  <div class="card">
     <p><b>Chain:</b> <span id="chain">LOADING</span></p>
     <p><b>Pay exactly:</b><br><code id="amount">LOADING</code></p>
     <p><b>To wallet:</b><br><code id="wallet">LOADING</code></p>
@@ -586,7 +597,7 @@ CHECKOUT_HTML = """
       const resp = await fetch('/v1/billing/free-trial', {method: 'POST'});
       const data = await resp.json();
       if (data.api_key) {
-        resultDiv.innerText = 'Trial key: ' + data.api_key + '\\nRequests: ' + data.quota_limit + '\\nExpires: ' + data.expires_in_days + ' days';
+        resultDiv.innerText = 'Trial key: ' + data.api_key + '\nRequests: ' + data.quota_limit + '\nExpires: ' + data.expires_in_days + ' days';
       } else {
         resultDiv.innerText = JSON.stringify(data, null, 2);
       }
@@ -603,7 +614,7 @@ CHECKOUT_HTML = """
       const resp = await fetch('/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId));
       const data = await resp.json();
       if (data.api_key) {
-        resultDiv.innerText = '✅ Payment verified. Your PAID API key is:\\n\\n' + data.api_key;
+        resultDiv.innerText = '✅ Payment verified. Your PAID API key is:\n\n' + data.api_key + '\n\n' + data.usage;
       } else {
         resultDiv.innerText = JSON.stringify(data, null, 2);
       }
