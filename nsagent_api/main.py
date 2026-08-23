@@ -52,6 +52,15 @@ CHAINS = {
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
+app = FastAPI(
+    title="Neuro-Symbolic Python Agent API",
+    version="6.0.0",
+    description="Self-trained Python expert + crypto subscription API.",
+)
+
+
+
+
 _expert: Optional[PythonExpertAgent] = None
 _trial_keys: Dict[str, Dict[str, Any]] = {}
 _paid_keys: Dict[str, Dict[str, Any]] = {}
