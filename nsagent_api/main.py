@@ -560,16 +560,17 @@ CHECKOUT_HTML = """
     code { background:#0f1524; padding:0.35rem 0.6rem; border-radius:8px; word-break:break-all; }
     input { width:100%; padding:0.8rem; border-radius:10px; border:1px solid #2b3652; background:#0f1524; color:white; margin-bottom:1rem; }
     button { background:#7c8cf8; color:white; border:none; padding:0.8rem 1.2rem; border-radius:10px; font-weight:700; cursor:pointer; width:100%; }
-    #result, #trial_result { margin-top:1rem; white-space:pre-wrap; }
+    #error_banner, #result, #trial_result { margin-top:1rem; white-space:pre-wrap; color:#ff9f9f; }
   </style>
 </head>
 <body id="checkout-page">
+  <div id="error_banner"></div>
   <h1>🐍 Python Agent API Access</h1>
   <p>Pay <b>469 POL</b> to receive a paid API key valid for 30 days.</p>
 
   <div class="card">
     <p><b>Free Trial:</b> Get 50 requests for 7 days.</p>
-    <button type="button" id="btn_free_trial">Get Free Trial API Key</button>
+    <button type="button" onclick="getFreeTrial()">Get Free Trial API Key</button>
     <div id="trial_result"></div>
   </div>
 
@@ -594,56 +595,72 @@ CHECKOUT_HTML = """
     <p><b>Step 1:</b> Send exactly <b>469 POL</b> to the wallet above on Polygon.</p>
     <p><b>Step 2:</b> Paste your transaction hash below.</p>
     <input type="text" id="tx_hash" placeholder="0x..." />
-    <button type="button" id="btn_verify_payment">Verify Payment & Get API Key</button>
+    <button type="button" onclick="verifyPayment()">Verify Payment & Get API Key</button>
     <div id="result"></div>
   </div>
 
   <script>
-    const INITIAL_PAYMENT = __PAYMENT_JSON__;
-    let currentRequestId = INITIAL_PAYMENT.request_id;
+    window.onerror = function(msg, src, line) {
+      document.getElementById('error_banner').innerText = 'JS Error: ' + msg + ' line ' + line;
+    };
+
+    var INITIAL_PAYMENT = __PAYMENT_JSON__;
+    var currentRequestId = INITIAL_PAYMENT.request_id;
 
     document.getElementById('chain').innerText = INITIAL_PAYMENT.chain + ' (' + INITIAL_PAYMENT.symbol + ')';
     document.getElementById('amount').innerText = INITIAL_PAYMENT.amount + ' ' + INITIAL_PAYMENT.symbol;
     document.getElementById('wallet').innerText = INITIAL_PAYMENT.wallet_address;
     document.getElementById('request_id').innerText = INITIAL_PAYMENT.request_id;
 
-    async function getFreeTrial() {
-      const resultDiv = document.getElementById('trial_result');
+    function getFreeTrial() {
+      var resultDiv = document.getElementById('trial_result');
       resultDiv.innerText = 'Requesting trial...';
-      const resp = await fetch('/v1/billing/free-trial', {method: 'POST'});
-      const data = await resp.json();
-      if (data.api_key) {
-        resultDiv.innerText = 'Trial key: ' + data.api_key + '\nRequests: ' + data.quota_limit + '\nExpires: ' + data.expires_in_days + ' days';
-      } else {
-        resultDiv.innerText = JSON.stringify(data, null, 2);
-      }
+      fetch('/v1/billing/free-trial', {method: 'POST'})
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+          if (data.api_key) {
+            resultDiv.innerText = 'Trial key: ' + data.api_key + '
+Requests: ' + data.quota_limit + '
+Expires: ' + data.expires_in_days + ' days';
+          } else {
+            resultDiv.innerText = JSON.stringify(data, null, 2);
+          }
+        })
+        .catch(function(err) {
+          resultDiv.innerText = 'Error: ' + err.message;
+        });
     }
 
-    async function verifyPayment() {
-      const tx = document.getElementById('tx_hash').value.trim();
-      const resultDiv = document.getElementById('result');
+    function verifyPayment() {
+      var tx = document.getElementById('tx_hash').value.trim();
+      var resultDiv = document.getElementById('result');
       if (!tx || !currentRequestId) {
         resultDiv.innerText = 'Transaction hash missing.';
         return;
       }
       resultDiv.innerText = 'Verifying...';
-      const resp = await fetch('/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId));
-      const data = await resp.json();
-      if (data.api_key) {
-        resultDiv.innerText = '✅ Payment verified. Your PAID API key is:\n\n' + data.api_key + '\n\n' + data.usage;
-      } else {
-        resultDiv.innerText = JSON.stringify(data, null, 2);
-      }
+      var url = '/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId);
+      fetch(url)
+        .then(function(resp) { return resp.json(); })
+        .then(function(data) {
+          if (data.api_key) {
+            resultDiv.innerText = '✅ Payment verified. Your PAID API key is:
+
+' + data.api_key + '
+
+' + data.usage;
+          } else {
+            resultDiv.innerText = JSON.stringify(data, null, 2);
+          }
+        })
+        .catch(function(err) {
+          resultDiv.innerText = 'Error: ' + err.message;
+        });
     }
-  </script>
-  <script>
-    document.getElementById('btn_free_trial').addEventListener('click', getFreeTrial);
-    document.getElementById('btn_verify_payment').addEventListener('click', verifyPayment);
   </script>
 </body>
 </html>
 """
-
 
 @app.get("/", response_class=HTMLResponse)
 def checkout_page():
