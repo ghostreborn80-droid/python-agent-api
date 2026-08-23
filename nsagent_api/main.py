@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import secrets
+import re
 import requests
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,7 @@ from web3 import Web3
 from nsagent.sandbox import RealSandbox
 from nsagent.db_retriever import DatabaseRetriever
 from nsagent.expert import PythonExpertAgent
+from nsagent.agent import NeuroSymbolicAgent
 
 
 WALLET_ADDRESS = os.environ.get(
@@ -54,11 +56,12 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 app = FastAPI(
     title="Neuro-Symbolic Python Agent API",
-    version="7.0.0",
-    description="Self-trained retrieval Python expert + crypto subscription API.",
+    version="8.0.0",
+    description="Retrieval Python expert + explicit code execution + codebase queries + crypto subscriptions.",
 )
 
 _expert: Optional[PythonExpertAgent] = None
+_codebase_agent: Optional[NeuroSymbolicAgent] = None
 _trial_keys: Dict[str, Dict[str, Any]] = {}
 _paid_keys: Dict[str, Dict[str, Any]] = {}
 _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
@@ -113,6 +116,15 @@ def get_expert() -> PythonExpertAgent:
             project_root=os.environ.get("AGENT_PROJECT_ROOT", "/app/sample_project"),
         )
     return _expert
+
+
+def get_codebase_agent() -> NeuroSymbolicAgent:
+    global _codebase_agent
+    if _codebase_agent is None:
+        project_root = os.environ.get("AGENT_PROJECT_ROOT", "/app/sample_project")
+        state_path = os.environ.get("AGENT_STATE_PATH", "/app/agent_state/final_model_v3.json")
+        _codebase_agent = NeuroSymbolicAgent(project_root=project_root, state_path=state_path)
+    return _codebase_agent
 
 
 def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
@@ -252,7 +264,7 @@ def free_trial(request: Request):
         "api_key": key,
         "expires_in_days": days,
         "quota_limit": quota_limit,
-        "usage": "Use X-API-Key header on /v1/ask-python and /v1/generate-script.",
+        "usage": "Use X-API-Key header on /v1/ask-python, /v1/generate-script, /v1/codebase-query, /v1/execute-python.",
     }
 
 
@@ -354,7 +366,7 @@ def direct_evm_verify(tx_hash: str, request_id: str):
         "chain": req["chain"],
         "amount_paid": float(req["amount_native"]),
         "expires_in_days": days,
-        "usage": "Use X-API-Key header on /v1/ask-python and /v1/generate-script.",
+        "usage": "Use X-API-Key header on /v1/ask-python, /v1/generate-script, /v1/codebase-query, /v1/execute-python.",
     }
 
 
@@ -384,6 +396,23 @@ class AgentResponse(BaseModel):
     status: str = "ok"
 
 
+def _looks_like_code(text: str) -> bool:
+    t = text.strip()
+    if t.startswith("```python"):
+        return True
+    if t.startswith("Execute Python:") or t.startswith("Execute:"):
+        return True
+    # heuristic: multiple lines with typical Python constructs
+    lines = [line.strip() for line in t.splitlines() if line.strip()]
+    if len(lines) >= 2:
+        for line in lines:
+            if line.startswith(("def ", "import ", "print(", "return ", "class ")):
+                return True
+    if t.startswith("print(") or t.startswith("import "):
+        return True
+    return False
+
+
 def _to_response(result: Dict[str, Any], request_type: str) -> AgentResponse:
     rtype = result.get("type", "unknown")
     trace = result.get("trace", []) or []
@@ -407,6 +436,16 @@ def _to_response(result: Dict[str, Any], request_type: str) -> AgentResponse:
     if rtype == "answer":
         return AgentResponse(request_type=request_type, message=msg, trace=trace, status="ok")
 
+    if rtype == "execute_python":
+        return AgentResponse(
+            request_type=request_type,
+            message="Execution complete",
+            trace=[],
+            output=result.get("stdout", ""),
+            tool="execute_python",
+            status=result.get("status", "error"),
+        )
+
     return AgentResponse(request_type=request_type, message=msg or str(result), trace=trace, status="ok")
 
 
@@ -420,18 +459,41 @@ def ask_python(req: AskPythonRequest, x_api_key: Optional[str] = Header(None, al
 @app.post("/v1/generate-script", response_model=AgentResponse)
 def generate_script(req: GenerateScriptRequest, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     require_api_key(x_api_key)
-    result = get_expert().generate(req.task)
+
+    task = req.task.strip()
+
+    # If the request contains explicit Python code, execute it directly.
+    if _looks_like_code(task):
+        # Clean up markdown or "Execute:" prefix
+        code = task
+        if code.startswith("```python"):
+            code = code[len("```python"):].strip("`").strip()
+        elif code.startswith("```"):
+            code = code.strip("`").strip()
+        if code.startswith("Execute Python:") or code.startswith("Execute:"):
+            code = code.split(":", 1)[1].strip()
+        if code.startswith("```"):
+            code = code.strip("`").strip()
+
+        sandbox = RealSandbox(project_root=os.environ.get("AGENT_PROJECT_ROOT", "/app/sample_project"))
+        filename = f"direct_{secrets.token_hex(4)}.py"
+        res = sandbox.run_code(code, filename=filename, timeout=20)
+
+        return {
+            "request_type": "execute_python",
+            "message": "Executed direct Python code",
+            "trace": [],
+            "output": (res.stdout or "").strip()[:2000],
+            "tool": "execute_python",
+            "status": "ok" if res.success else "error",
+        }
+
+    # Otherwise, use retrieval-based expert generation.
+    result = get_expert().generate(task)
     return _to_response(result, "generate_script")
 
 
-@app.post("/v1/codebase-query", response_model=AgentResponse)
-def codebase_query(req: CodebaseQueryRequest, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
-    require_api_key(x_api_key)
-    result = get_expert().answer(req.question)
-    return _to_response(result, "codebase_query")
-
-
-@app.post("/v1/execute-python")
+@app.post("/v1/execute-python", response_model=AgentResponse)
 def execute_python(req: ExecutePythonRequest, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     require_api_key(x_api_key)
 
@@ -442,20 +504,25 @@ def execute_python(req: ExecutePythonRequest, x_api_key: Optional[str] = Header(
     if not code:
         raise HTTPException(status_code=400, detail="Code cannot be empty.")
 
-    sandbox = RealSandbox(
-        project_root=os.environ.get("AGENT_PROJECT_ROOT", "/app/sample_project")
-    )
+    sandbox = RealSandbox(project_root=os.environ.get("AGENT_PROJECT_ROOT", "/app/sample_project"))
     filename = f"execute_{secrets.token_hex(4)}.py"
     res = sandbox.run_code(code, filename=filename, timeout=req.timeout)
 
     return {
         "request_type": "execute_python",
+        "message": "Execution complete",
+        "trace": [],
+        "output": (res.stdout or "").strip()[:2000],
+        "tool": "execute_python",
         "status": "ok" if res.success else "error",
-        "returncode": res.returncode,
-        "stdout": (res.stdout or "").strip()[:2000],
-        "stderr": (res.stderr or "").strip()[:2000],
-        "timed_out": res.timed_out,
     }
+
+
+@app.post("/v1/codebase-query", response_model=AgentResponse)
+def codebase_query(req: CodebaseQueryRequest, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    require_api_key(x_api_key)
+    result = get_codebase_agent().handle(req.question)
+    return _to_response(result, "codebase_query")
 
 
 CHECKOUT_HTML = """
@@ -504,7 +571,13 @@ CHECKOUT_HTML = """
     -H "Content-Type: application/json" \<br>
     -d '{"task":"Write a Python script to check if a number is prime"}'</code>
 
-    <p><b>3. Query the included sample project</b></p>
+    <p><b>3. Execute arbitrary Python code</b></p>
+    <code>curl -X POST https://python-agent-api.onrender.com/v1/execute-python \<br>
+    -H "X-API-Key: YOUR_KEY" \<br>
+    -H "Content-Type: application/json" \<br>
+    -d '{"code":"print(123456789 * 987654321)"}'</code>
+
+    <p><b>4. Query the included sample project</b></p>
     <code>curl -X POST https://python-agent-api.onrender.com/v1/codebase-query \<br>
     -H "X-API-Key: YOUR_KEY" \<br>
     -H "Content-Type: application/json" \<br>
