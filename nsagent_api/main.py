@@ -179,6 +179,29 @@ def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
 
     raise HTTPException(status_code=401, detail="Invalid API key.")
 
+
+
+# ---------------------------------------------------------------- schemas
+class AskPythonRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=500)
+
+
+class GenerateScriptRequest(BaseModel):
+    task: str = Field(..., min_length=3, max_length=500)
+
+
+class CodebaseQueryRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=500)
+
+
+class AgentResponse(BaseModel):
+    request_type: str
+    message: str
+    trace: List[str] = []
+    output: Optional[str] = None
+    tool: Optional[str] = None
+    status: str = "ok"
+
 def _extract_stdout(result: Any) -> Optional[str]:
     """Best-effort extraction of sandbox stdout from a tool result."""
     try:
