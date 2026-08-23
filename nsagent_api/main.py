@@ -58,6 +58,7 @@ FREE_MONTHLY_QUOTA = 100
 _quota: Dict[str, Dict[str, int]] = {}
 _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
 _direct_evm_keys: Dict[str, str] = {}
+_direct_evm_key_expiry: Dict[str, float] = {}
 
 
 def check_quota(api_key: str) -> None:
@@ -85,8 +86,11 @@ def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
     if x_api_key in paid_keys:
         return x_api_key
 
-    # Also accept keys issued by the direct EVM billing service.
+    # Direct EVM paid key with expiry check.
     if "_direct_evm_keys" in globals() and x_api_key in _direct_evm_keys:
+        expiry = _direct_evm_key_expiry.get(x_api_key)
+        if expiry and time.time() > expiry:
+            raise HTTPException(status_code=401, detail="API key expired. Pay for another month.")
         return x_api_key
 
     raise HTTPException(status_code=401, detail="Invalid API key.")
@@ -230,17 +234,18 @@ import secrets
 import time
 
 WALLET_ADDRESS = "0x12133a4f996bdc9d2894b441e1f8621b499d2c3c"
-CHAINS = {"ethereum": {"rpc": "https://eth.llamarpc.com", "chain_id": 1, "decimals": 18, "symbol": "ETH"}, "polygon": {"rpc": "https://polygon.llamarpc.com", "chain_id": 137, "decimals": 18, "symbol": "MATIC"}, "bsc": {"rpc": "https://bsc-dataseed.binance.org", "chain_id": 56, "decimals": 18, "symbol": "BNB"}, "avalanche": {"rpc": "https://api.avax.network/ext/bc/C/rpc", "chain_id": 43114, "decimals": 18, "symbol": "AVAX"}, "arbitrum": {"rpc": "https://arb1.arbitrum.io/rpc", "chain_id": 42161, "decimals": 18, "symbol": "ARB"}, "optimism": {"rpc": "https://mainnet.optimism.io", "chain_id": 10, "decimals": 18, "symbol": "OP"}, "base": {"rpc": "https://mainnet.base.org", "chain_id": 8453, "decimals": 18, "symbol": "ETH"}}
+CHAINS = {"ethereum": {"rpc": "https://eth.llamarpc.com", "chain_id": 1, "decimals": 18, "symbol": "ETH"}, "polygon": {"rpc": "https://polygon.llamarpc.com", "chain_id": 137, "decimals": 18, "symbol": "POL"}, "bsc": {"rpc": "https://bsc-dataseed.binance.org", "chain_id": 56, "decimals": 18, "symbol": "BNB"}, "avalanche": {"rpc": "https://api.avax.network/ext/bc/C/rpc", "chain_id": 43114, "decimals": 18, "symbol": "AVAX"}, "arbitrum": {"rpc": "https://arb1.arbitrum.io/rpc", "chain_id": 42161, "decimals": 18, "symbol": "ARB"}, "optimism": {"rpc": "https://mainnet.optimism.io", "chain_id": 10, "decimals": 18, "symbol": "OP"}, "base": {"rpc": "https://mainnet.base.org", "chain_id": 8453, "decimals": 18, "symbol": "ETH"}}
 
 # Store active payment requests
 _direct_evm_requests: Dict[str, Dict[str, Any]] = {}
 _direct_evm_keys: Dict[str, str] = {}
+_direct_evm_key_expiry: Dict[str, float] = {}
 
 
 CHAINS = {
     # Mainnets
     "ethereum": {"rpc": "https://eth.llamarpc.com", "chain_id": 1, "decimals": 18, "symbol": "ETH"},
-    "polygon":  {"rpc": "https://polygon.llamarpc.com", "chain_id": 137, "decimals": 18, "symbol": "MATIC"},
+    "polygon":  {"rpc": "https://polygon.llamarpc.com", "chain_id": 137, "decimals": 18, "symbol": "POL"},
     "bsc":      {"rpc": "https://bsc-dataseed.binance.org", "chain_id": 56, "decimals": 18, "symbol": "BNB"},
     "avalanche":{"rpc": "https://api.avax.network/ext/bc/C/rpc", "chain_id": 43114, "decimals": 18, "symbol": "AVAX"},
     "arbitrum": {"rpc": "https://arb1.arbitrum.io/rpc", "chain_id": 42161, "decimals": 18, "symbol": "ARB"},
@@ -286,16 +291,15 @@ def _verify_evm_tx(chain: str, tx_hash: str, expected_wei: int) -> bool:
 
 
 @app.get("/v1/billing/crypto/direct-address")
-def direct_evm_address(chain: Optional[str] = None):
-    chain = chain or os.environ.get("PAYMENT_CHAIN", "polygon")
+def direct_evm_address(chain: str = "polygon"):
     if chain not in CHAINS:
         raise HTTPException(status_code=400, detail=f"Unsupported chain: {chain}. Available: {list(CHAINS)}")
 
-    payment_id = secrets.randbelow(900000) + 100000  # 6-digit id
+    amount_native = float(os.environ.get("SUBSCRIPTION_PRICE_POL", "469"))
     decimals = CHAINS[chain]["decimals"]
-    amount_wei = _make_payment_amount(payment_id, decimals)
-    amount_native = amount_wei / (10 ** decimals)
+    amount_wei = int(amount_native * (10 ** decimals))
 
+    payment_id = secrets.randbelow(900000) + 100000
     request_id = secrets.token_hex(8)
     _direct_evm_requests[request_id] = {
         "payment_id": payment_id,
@@ -305,6 +309,7 @@ def direct_evm_address(chain: Optional[str] = None):
         "wallet": WALLET_ADDRESS,
         "status": "waiting",
         "created_at": time.time(),
+        "subscription_days": int(os.environ.get("SUBSCRIPTION_DAYS", "30")),
     }
 
     return {
@@ -317,11 +322,10 @@ def direct_evm_address(chain: Optional[str] = None):
         "amount_wei": amount_wei,
         "instructions": (
             f"Send EXACTLY {amount_native} {CHAINS[chain]['symbol']} to {WALLET_ADDRESS} "
-            f"on {chain}. Then submit the transaction hash to /v1/billing/crypto/verify."
+            f"on {chain}. Then submit the transaction hash."
         ),
+        "billing": "monthly",
     }
-
-
 @app.get("/v1/billing/crypto/verify")
 def direct_evm_verify(tx_hash: str, request_id: str):
     if request_id not in _direct_evm_requests:
@@ -337,126 +341,18 @@ def direct_evm_verify(tx_hash: str, request_id: str):
     key = "sk_live_" + secrets.token_urlsafe(24)
     _direct_evm_keys[key] = "evm-paid-user"
 
+    days = req.get("subscription_days", int(os.environ.get("SUBSCRIPTION_DAYS", "30")))
+    _direct_evm_key_expiry[key] = time.time() + (days * 86400)
+
     return {
         "status": "paid",
         "api_key": key,
         "request_id": request_id,
         "chain": req["chain"],
         "amount_paid": req["amount_native"],
+        "expires_in_days": days,
+        "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_direct_evm_key_expiry[key])),
     }
-
-
-
-CHECKOUT_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Python Agent API Access</title>
-  <style>
-    body { font-family: system-ui, sans-serif; background:#0b0f19; color:#e6e8ee; max-width:560px; margin:3rem auto; padding:0 1rem; }
-    h1 { color:#7c8cf8; }
-    .card { background:#141a2b; border:1px solid #26304a; border-radius:18px; padding:1.5rem; margin-bottom:1rem; }
-    code { background:#0f1524; padding:0.35rem 0.6rem; border-radius:8px; word-break:break-all; }
-    input { width:100%; padding:0.8rem; border-radius:10px; border:1px solid #2b3652; background:#0f1524; color:white; margin-bottom:1rem; }
-    button { background:#7c8cf8; color:white; border:none; padding:0.8rem 1.2rem; border-radius:10px; font-weight:700; cursor:pointer; width:100%; }
-    #result { margin-top:1rem; white-space:pre-wrap; }
-  </style>
-</head>
-<body id="checkout-page">
-  <h1>🐍 Python Agent API Access</h1>
-  <p>Pay in crypto to receive a paid API key.</p>
-
-  <div class="card">
-    <p><b>Chain:</b> <span id="chain">...</span></p>
-    <p><b>Pay exactly:</b><br><code id="amount">...</code></p>
-    <p><b>To wallet:</b><br><code id="wallet">...</code></p>
-    <p><b>Request ID:</b> <span id="request_id"></span></p>
-  </div>
-
-  <div class="card">
-    <p><b>Step 1:</b> Send the exact amount above.</p>
-    <p><b>Step 2:</b> Paste your transaction hash below.</p>
-    <input type="text" id="tx_hash" placeholder="0x..." />
-    <button onclick="verifyPayment()">Verify Payment & Get API Key</button>
-    <div id="result"></div>
-  </div>
-
-  <script>
-    const INITIAL_PAYMENT = __PAYMENT_JSON__;
-    let currentRequestId = INITIAL_PAYMENT.request_id;
-
-    document.getElementById('chain').innerText = INITIAL_PAYMENT.chain + ' (' + INITIAL_PAYMENT.symbol + ')';
-    document.getElementById('amount').innerText = INITIAL_PAYMENT.amount + ' ' + INITIAL_PAYMENT.symbol;
-    document.getElementById('wallet').innerText = INITIAL_PAYMENT.wallet_address;
-    document.getElementById('request_id').innerText = INITIAL_PAYMENT.request_id;
-
-    async function verifyPayment() {
-      const tx = document.getElementById('tx_hash').value.trim();
-      const resultDiv = document.getElementById('result');
-      if (!tx || !currentRequestId) {
-        resultDiv.innerText = 'Transaction hash missing or payment request not loaded.';
-        return;
-      }
-      resultDiv.innerText = 'Verifying...';
-      const resp = await fetch('/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId));
-      const data = await resp.json();
-      if (data.api_key) {
-        resultDiv.innerText = '✅ Payment verified. Your PAID API key is:
-
-' + data.api_key;
-      } else {
-        resultDiv.innerText = JSON.stringify(data, null, 2);
-      }
-    }
-  </script>
-</body>
-</html>
-"""
-
-
-@app.get("/", response_class=HTMLResponse)
-def checkout_page():
-    try:
-        payment = direct_evm_address()
-        payment_json = json.dumps(payment)
-    except Exception as e:
-        payment = {
-            "request_id": "ERROR",
-            "payment_id": 0,
-            "wallet_address": "ERROR",
-            "chain": "ERROR",
-            "symbol": "ERROR",
-            "amount": "ERROR",
-            "amount_wei": 0,
-        }
-        payment_json = json.dumps(payment)
-
-    html = CHECKOUT_HTML
-    html = html.replace("__PAYMENT_JSON__", payment_json)
-
-    # Server-render the visible values directly, so the page works even
-    # without JavaScript execution.
-    html = html.replace(
-        '<span id="chain">...</span>',
-        f'<span id="chain">{payment["chain"]} ({payment["symbol"]})</span>',
-    )
-    html = html.replace(
-        '<code id="amount">...</code>',
-        f'<code id="amount">{payment["amount"]} {payment["symbol"]}</code>',
-    )
-    html = html.replace(
-        '<code id="wallet">...</code>',
-        f'<code id="wallet">{payment["wallet_address"]}</code>',
-    )
-    html = html.replace(
-        '<span id="request_id"></span>',
-        f'<span id="request_id">{payment["request_id"]}</span>',
-    )
-
-    return html
-
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "neuro-symbolic-python-agent"}
