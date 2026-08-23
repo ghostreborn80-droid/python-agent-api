@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, "/content")
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from web3 import Web3
 from pydantic import BaseModel, Field
 
@@ -335,6 +336,72 @@ def direct_evm_verify(tx_hash: str, request_id: str):
         "amount_paid": req["amount_native"],
     }
 
+
+
+CHECKOUT_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python Agent API Access</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0b0f19; color:#e6e8ee; max-width:560px; margin:3rem auto; padding:0 1rem; }
+    h1 { color:#7c8cf8; }
+    .card { background:#141a2b; border:1px solid #26304a; border-radius:18px; padding:1.5rem; margin-bottom:1rem; }
+    code { background:#0f1524; padding:0.35rem 0.6rem; border-radius:8px; word-break:break-all; }
+    input { width:100%; padding:0.8rem; border-radius:10px; border:1px solid #2b3652; background:#0f1524; color:white; margin-bottom:1rem; }
+    button { background:#7c8cf8; color:white; border:none; padding:0.8rem 1.2rem; border-radius:10px; font-weight:700; cursor:pointer; width:100%; }
+    #result { margin-top:1rem; white-space:pre-wrap; }
+  </style>
+</head>
+<body id="checkout-page">
+  <h1>🐍 Python Agent API Access</h1>
+  <p>Pay in crypto to receive a paid API key.</p>
+  <div class="card">
+    <p><b>Chain:</b> <span id="chain">...</span></p>
+    <p><b>Pay exactly:</b><br><code id="amount">...</code></p>
+    <p><b>To wallet:</b><br><code id="wallet">...</code></p>
+    <p><b>Request ID:</b> <span id="request_id"></span></p>
+  </div>
+  <div class="card">
+    <p><b>Step 1:</b> Send the exact amount above.</p>
+    <p><b>Step 2:</b> Paste your transaction hash below.</p>
+    <input type="text" id="tx_hash" placeholder="0x..." />
+    <button onclick="verifyPayment()">Verify Payment & Get API Key</button>
+    <div id="result"></div>
+  </div>
+  <script>
+    let currentRequestId = null;
+    async function loadPayment() {
+      const resp = await fetch('/v1/billing/crypto/direct-address?chain=polygon-amoy');
+      const data = await resp.json();
+      currentRequestId = data.request_id;
+      document.getElementById('chain').innerText = data.chain + ' (' + data.symbol + ')';
+      document.getElementById('amount').innerText = data.amount + ' ' + data.symbol;
+      document.getElementById('wallet').innerText = data.wallet_address;
+      document.getElementById('request_id').innerText = data.request_id;
+    }
+    async function verifyPayment() {
+      const tx = document.getElementById('tx_hash').value.trim();
+      const resultDiv = document.getElementById('result');
+      if (!tx || !currentRequestId) { resultDiv.innerText = 'Transaction hash missing.'; return; }
+      resultDiv.innerText = 'Verifying...';
+      const resp = await fetch('/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId));
+      const data = await resp.json();
+      if (data.api_key) { resultDiv.innerText = '✅ Payment verified. Your PAID API key is:\n\n' + data.api_key; }
+      else { resultDiv.innerText = JSON.stringify(data, null, 2); }
+    }
+    loadPayment();
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def checkout_page():
+    return CHECKOUT_HTML
 
 @app.get("/health")
 def health():
