@@ -353,6 +353,92 @@ def direct_evm_verify(tx_hash: str, request_id: str):
         "expires_in_days": days,
         "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_direct_evm_key_expiry[key])),
     }
+CHECKOUT_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python Agent API Access</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0b0f19; color:#e6e8ee; max-width:560px; margin:3rem auto; padding:0 1rem; }
+    h1 { color:#7c8cf8; }
+    .card { background:#141a2b; border:1px solid #26304a; border-radius:18px; padding:1.5rem; margin-bottom:1rem; }
+    code { background:#0f1524; padding:0.35rem 0.6rem; border-radius:8px; word-break:break-all; }
+    input { width:100%; padding:0.8rem; border-radius:10px; border:1px solid #2b3652; background:#0f1524; color:white; margin-bottom:1rem; }
+    button { background:#7c8cf8; color:white; border:none; padding:0.8rem 1.2rem; border-radius:10px; font-weight:700; cursor:pointer; width:100%; }
+    #result { margin-top:1rem; white-space:pre-wrap; }
+  </style>
+</head>
+<body id="checkout-page">
+  <h1>🐍 Python Agent API Access</h1>
+  <p>Pay <b>469 POL</b> to receive a paid API key valid for 30 days.</p>
+
+  <div class="card">
+    <p><b>Chain:</b> <span id="chain">POLYGON (POL)</span></p>
+    <p><b>Pay exactly:</b><br><code id="amount">469 POL</code></p>
+    <p><b>To wallet:</b><br><code id="wallet">0x12133a4f996bdc9d2894b441e1f8621b499d2c3c</code></p>
+    <p><b>Request ID:</b> <span id="request_id">LOADING</span></p>
+  </div>
+
+  <div class="card">
+    <p><b>Step 1:</b> Send exactly <b>469 POL</b> to the wallet above on Polygon.</p>
+    <p><b>Step 2:</b> Paste your transaction hash below.</p>
+    <input type="text" id="tx_hash" placeholder="0x..." />
+    <button onclick="verifyPayment()">Verify Payment & Get API Key</button>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    const INITIAL_PAYMENT = __PAYMENT_JSON__;
+    let currentRequestId = INITIAL_PAYMENT.request_id;
+
+    document.getElementById('chain').innerText = INITIAL_PAYMENT.chain + ' (' + INITIAL_PAYMENT.symbol + ')';
+    document.getElementById('amount').innerText = INITIAL_PAYMENT.amount + ' ' + INITIAL_PAYMENT.symbol;
+    document.getElementById('wallet').innerText = INITIAL_PAYMENT.wallet_address;
+    document.getElementById('request_id').innerText = INITIAL_PAYMENT.request_id;
+
+    async function verifyPayment() {
+      const tx = document.getElementById('tx_hash').value.trim();
+      const resultDiv = document.getElementById('result');
+      if (!tx || !currentRequestId) { resultDiv.innerText = 'Transaction hash missing.'; return; }
+      resultDiv.innerText = 'Verifying...';
+      const resp = await fetch('/v1/billing/crypto/verify?tx_hash=' + encodeURIComponent(tx) + '&request_id=' + encodeURIComponent(currentRequestId));
+      const data = await resp.json();
+      if (data.api_key) { resultDiv.innerText = '✅ Payment verified. Your PAID API key is:\n\n' + data.api_key; }
+      else { resultDiv.innerText = JSON.stringify(data, null, 2); }
+    }
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def checkout_page():
+    try:
+        payment = direct_evm_address(chain="polygon")
+        payment_json = json.dumps(payment)
+    except Exception as e:
+        payment = {
+            "request_id": "ERROR",
+            "payment_id": 0,
+            "wallet_address": WALLET_ADDRESS,
+            "chain": "polygon",
+            "symbol": "POL",
+            "amount": 469.0,
+            "amount_wei": 0,
+        }
+        payment_json = json.dumps(payment)
+
+    html = CHECKOUT_HTML.replace("__PAYMENT_JSON__", payment_json)
+    html = html.replace('<span id="chain">POLYGON (POL)</span>', f'<span id="chain">{payment["chain"]} ({payment["symbol"]})</span>')
+    html = html.replace('<code id="amount">469 POL</code>', f'<code id="amount">{payment["amount"]} {payment["symbol"]}</code>')
+    html = html.replace('<code id="wallet">0x12133a4f996bdc9d2894b441e1f8621b499d2c3c</code>', f'<code id="wallet">{payment["wallet_address"]}</code>')
+    html = html.replace('<span id="request_id">LOADING</span>', f'<span id="request_id">{payment["request_id"]}</span>')
+
+    return html
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "neuro-symbolic-python-agent"}
